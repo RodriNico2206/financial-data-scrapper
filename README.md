@@ -48,7 +48,12 @@ To run the CEDEAR Valuation Pipeline, ensure you have:
 * A compatible operating system (Windows, macOS, or Linux)
 * The `uv` package manager installed (for environment management)
 
-Create and activate a virtual environment using `uv`:
+To set up the environment:
+1. Install `uv` using the official installation instructions.
+2. Run `uv sync` to synchronize the environment.
+3. Create a `config.json` file based on the `template_config.json` template, filling in the required parameters (e.g., FRED API key, Google Drive configuration).
+
+Create and activate a virtual environment using `uv` commands:
 ```bash
 uv sync
 uv run python -m venv venv
