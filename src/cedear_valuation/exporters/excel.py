@@ -1,4 +1,5 @@
 import pandas as pd
+from pathlib import Path
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -23,13 +24,21 @@ COLUMN_DESCRIPTIONS = [
 def export_to_excel(
     comafi_df: pd.DataFrame,
     valuation_df: pd.DataFrame,
-    filename: str = "cedear_valuation_report.xlsx"
+    filename: str = "cedear_valuation_report.xlsx",
+    output_dir: str = "reports"
 ):
-    """Exporta DataFrames a Excel aplicando formatos numéricos profesionales,
+    """Exporta DataFrames a Excel guardando el archivo dentro del directorio especificado.
 
-    estilos visuales, autoajuste de columnas y un glosario explicativo.
+    Crea la carpeta automáticamente si aún no existe.
     """
-    with pd.ExcelWriter(filename, engine="openpyxl") as writer:
+    # Crear la carpeta de salida si no existe
+    reports_path = Path(output_dir)
+    reports_path.mkdir(parents=True, exist_ok=True)
+
+    # Definir la ruta completa del archivo
+    filepath = reports_path / filename
+
+    with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
         # 1. Escribir los DataFrames en pestañas separadas
         valuation_df.to_excel(writer, sheet_name="Valuation", index=False)
         comafi_df.to_excel(writer, sheet_name="Comafi Ratios", index=False)
@@ -142,4 +151,4 @@ def export_to_excel(
                 
                 worksheet.column_dimensions[col_letter].width = max(max_len + 5, 14)
 
-    print(f"Successfully created '{filename}' with formatted numbers and glossary!")
+    print(f"Successfully created '{filepath}' with formatted numbers and glossary!")
