@@ -1,15 +1,30 @@
 {
-  "fred_api_key": "YOUR_FRED_API_KEY",
+  "fred_api_key": "3dd8c1d828de5c0332ead6d60cfc7521",
   "sectors": {
-    "sector_1": [
-      "ticker_1",
-      "ticker_2",
-      "ticker_3"
+    "Cloud Computing & Enterprise Software": [
+      "MSFT",
+      "AMZN",
+      "CRM"
     ],
-    "sector_2": [
-      "ticker_4",
-      "ticker_5",
-      "ticker_6"
+    "Semiconductors & Hardware": [
+      "NVDA",
+      "ASML",
+      "AAPL"
+    ],
+    "AI & Big Data": [
+      "GOOGL",
+      "META"
+    ],
+    "FinTech & Payments": [
+      "V",
+      "MA"
+    ],
+    "Diversified & Defensive": [
+      "BRK-B"
+    ],
+    "Emerging Tech & International": [
+      "NFLX",
+      "BABA"
     ]
   }
 }
