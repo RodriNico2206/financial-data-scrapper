@@ -1,73 +1,103 @@
-# financial-data-scrapper
+# CEDEAR Valuation Pipeline
+The CEDEAR Valuation Pipeline is a Python-based system designed to fetch and process financial data for CEDEAR (Certificado de Depósito Argentino) valuation. It utilizes various data sources, including COMAFI, FRED, and market financials, to calculate intrinsic values and margins of safety for specified tickers and sectors.
 
+## Key Features
+* Fetches CEDEAR data from COMAFI
+* Retrieves AAA yield from FRED
+* Calculates Graham intrinsic value and margin of safety for specified tickers and sectors
+* Exports valuation results to Excel
+* Optionally uploads reports to Google Drive using `rclone`
 
-financial-data-scrapper --config config.json
-
-uv pip install -e .
-
-## ☁️ Google Drive Setup with `rclone`
-
-Follow these steps to configure `rclone` for automatically uploading generated report files to your Google Drive.
-
-### 1. Install `rclone` (Linux / WSL)
-
-If you haven't installed `rclone` yet, run the following command in your terminal:
-
+## Directory Hierarchy
 ```bash
-sudo apt update && sudo apt install -y rclone
+.
+├── .gitignore
+├── README.md
+├── pyproject.toml
+├── src
+│   ├── cedear_valuation
+│   │   ├── __init__.py
+│   │   ├── config.py
+│   │   ├── exporters
+│   │   │   ├── __init__.py
+│   │   │   └── excel.py
+│   │   ├── main.py
+│   │   ├── models
+│   │   │   ├── __init__.py
+│   │   │   └── valuation.py
+│   │   └── scrapers
+│   │       ├── __init__.py
+│   │       ├── comafi.py
+│   │       ├── fred.py
+│   │       └── market.py
+├── template_config.json
+└── uv.lock
 ```
 
-### 2. Configure the Remote Access
-Run the interactive configuration wizard:
+## Module Functionality
+The CEDEAR Valuation Pipeline consists of several modules:
+* `config.py`: Handles configuration loading from a JSON file
+* `exporters/excel.py`: Exports valuation results to Excel
+* `models/valuation.py`: Calculates Graham intrinsic value and margin of safety
+* `scrapers/comafi.py`, `scrapers/fred.py`, `scrapers/market.py`: Fetch data from COMAFI, FRED, and market financials, respectively
+* `main.py`: Orchestrates the pipeline execution
+
+## Prerequisites and Environment Setup
+To run the CEDEAR Valuation Pipeline, you'll need:
+* Python 3.8+
+* `rclone` (for Google Drive uploads)
+* A compatible operating system (Linux, WSL, or similar)
+
+### Virtual Environment Setup
+The project uses `pyproject.toml` for dependency management. To create and activate a virtual environment:
 ```bash
-rclone config
+poetry install
+poetry shell
 ```
 
-Follow the step-by-step interactive prompt:
+### Configuration
+The pipeline uses a JSON configuration file (`config.json`) to store settings. The file should contain the following parameters:
+* `fred_api_key`: FRED API key
+* `google_drive` (optional): Google Drive configuration
+	+ `enabled`: Whether to upload reports to Google Drive
+	+ `remote_name`: `rclone` remote name
+	+ `folder_name`: Target folder path on Google Drive
 
-- `New Remote`: Type n and press Enter.
-
-- `Name`: Type inverg (or the remote_name specified in your config.json) and press Enter.
-
-- `Storage Type`: Select Google Drive by entering 18 (or typing drive) and press Enter.
-
-- `Client ID`: Leave blank, press Enter.
-
-- `Client Secret`: Leave blank, press Enter.
-
-- `Scope`: Type 1 (Full access) and press Enter.
-
-- `Service Account File`: Leave blank, press Enter.
-
-- `Advanced Config`: Type n and press Enter.
-
-- `Auto Config`: Type y and press Enter.
-
-
-If using WSL or a remote terminal: Copy the generated `http://127.0.0.1:53682/auth...` URL into your web browser, sign in with your Google account, grant the required permissions, and copy the authorization code back if prompted.
-
-- `Shared Drive`: Type n and press Enter.
-
-- `Confirm`: Type y to accept the configuration.
-
-- `Quit`: Type q to exit the setup wizard.
-
-### 3. Verify the Connection
-You can verify that your Google Drive remote is properly linked by listing the root directories:
-
-```bash
-rclone lsd inverg
-```
-
-### 4. Update config.json
-Ensure your config.json includes the correct google_drive parameters matching your rclone remote name and target folder path:
-
+Example `config.json`:
 ```json
 {
+  "fred_api_key": "YOUR_FRED_API_KEY",
   "google_drive": {
     "enabled": true,
-    "remote_name": "remote_name",
-    "folder_name": "path_folder"
+    "remote_name": "inverg",
+    "folder_name": "CEDEAR_Reports"
   }
 }
+```
+
+## Installation
+To install the required dependencies:
+```bash
+poetry install
+```
+
+## Usage Example
+To run the pipeline:
+```bash
+poetry run python src/cedear_valuation/main.py --config config.json
+```
+
+## Usage Restrictions
+The pipeline assumes that the `rclone` configuration is set up correctly and that the Google Drive remote is accessible. Additionally, the pipeline requires a valid FRED API key to fetch AAA yield data.
+
+## Workflow Diagram
+```mermaid
+graph LR
+    A[Load Configuration] -->|config.json| B[Fetch COMAFI Data]
+    B --> C[Process COMAFI Data]
+    C --> D[Fetch FRED AAA Yield]
+    D --> E[Calculate Intrinsic Value and Margin of Safety]
+    E --> F[Export Valuation Results to Excel]
+    F -->|optional| G[Upload Report to Google Drive]
+    G --> H[Pipeline Execution Finished]
 ```
