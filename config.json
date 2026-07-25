@@ -1,0 +1,15 @@
+{
+  "fred_api_key": "YOUR_FRED_API_KEY",
+  "sectors": {
+    "sector_1": [
+      "ticker_1",
+      "ticker_2",
+      "ticker_3"
+    ],
+    "sector_2": [
+      "ticker_4",
+      "ticker_5",
+      "ticker_6"
+    ]
+  }
+}
