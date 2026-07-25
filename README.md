@@ -5,8 +5,6 @@ financial-data-scrapper --config config.json
 
 uv pip install -e .
 
-rclone config
-
 ## ☁️ Google Drive Setup with `rclone`
 
 Follow these steps to configure `rclone` for automatically uploading generated report files to your Google Drive.
