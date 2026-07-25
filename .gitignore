@@ -1,4 +1,4 @@
-/src/cedear_valuation/__pycache__/
+src/cedear_valuation/**/__pycache__/
 .venv
 reports/
 config.json
