@@ -1,9 +1,9 @@
-import pandas as pd
 from pathlib import Path
+import pandas as pd
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-# Glosario explicativo de columnas
+# Glosario explicativo de columnas actualizado
 COLUMN_DESCRIPTIONS = [
     ("ticker", "Símbolo bursátil de la empresa en Wall Street (ej. AAPL, MSFT)."),
     ("sector", "Categoría o segmento de industria al que pertenece la empresa."),
@@ -17,6 +17,7 @@ COLUMN_DESCRIPTIONS = [
     ("shares_outstanding", "Número total de acciones en circulación emitidas por la empresa."),
     ("intrinsic_value_graham", "Valor intrínseco teórico calculado mediante la fórmula de Benjamin Graham."),
     ("margin_of_safety_%", "Margen de seguridad (% de descuento respecto al valor intrínseco)."),
+    ("ccl", "Dólar Contado con Liquidación implícito para el activo (Tipo de Cambio Implícito Rava)."),
     ("aaa_rate_used", "Tasa de rendimiento de bonos corporativos AAA usada como tasa de descuento.")
 ]
 
@@ -24,11 +25,12 @@ COLUMN_DESCRIPTIONS = [
 def export_to_excel(
     comafi_df: pd.DataFrame,
     valuation_df: pd.DataFrame,
+    ccl_benchmark: float | None = None,
     filename: str = "cedear_valuation_report.xlsx",
     output_dir: str = "reports"
 ) -> Path:
-    """Exporta DataFrames a Excel dentro del directorio especificado
-    y retorna la ruta (Path) del archivo generado.
+    """Exporta DataFrames a Excel aplicando formato numérico, glosario y 
+    resaltado condicional en amarillo para valores de CCL < ccl_benchmark.
     """
     reports_path = Path(output_dir)
     reports_path.mkdir(parents=True, exist_ok=True)
@@ -39,13 +41,16 @@ def export_to_excel(
         valuation_df.to_excel(writer, sheet_name="Valuation", index=False)
         comafi_df.to_excel(writer, sheet_name="Comafi Ratios", index=False)
         
-        # Estilos
+        # Estilos generales
         header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
         header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
         
         section_font = Font(name="Calibri", size=11, bold=True, color="1F4E78")
         bold_font = Font(name="Calibri", size=10, bold=True)
         regular_font = Font(name="Calibri", size=10)
+
+        # Relleno amarillo claro para la alerta condicional de CCL
+        ccl_yellow_fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
 
         thin_border = Border(
             left=Side(style="thin", color="D9D9D9"),
@@ -58,7 +63,7 @@ def export_to_excel(
         left_align = Alignment(horizontal="left", vertical="center")
         right_align = Alignment(horizontal="right", vertical="center")
 
-        # Formato base
+        # Formato base para todas las pestañas
         for sheet_name in writer.sheets:
             worksheet = writer.sheets[sheet_name]
 
@@ -77,10 +82,11 @@ def export_to_excel(
                     else:
                         cell.alignment = right_align
 
-        # Formatos numéricos en 'Valuation'
+        # Formatos numéricos y formato condicional en 'Valuation'
         val_ws = writer.sheets["Valuation"]
         col_indices = {cell.value: idx + 1 for idx, cell in enumerate(val_ws[1])}
 
+        # Porcentajes
         pct_cols = ["earnings_growth", "margin_of_safety_%", "aaa_rate_used"]
         for col_name in pct_cols:
             if col_name in col_indices:
@@ -91,6 +97,7 @@ def export_to_excel(
                     if col_name in ["margin_of_safety_%", "aaa_rate_used"] and isinstance(cell.value, (int, float)):
                         cell.value = cell.value / 100.0
 
+        # Números enteros
         num_cols = ["free_cash_flow", "shares_outstanding"]
         for col_name in num_cols:
             if col_name in col_indices:
@@ -99,7 +106,15 @@ def export_to_excel(
                     cell = val_ws.cell(row=row, column=col_idx)
                     cell.number_format = '#,##0'
 
-        currency_cols = ["current_price", "trailing_eps", "forward_eps", "book_value", "intrinsic_value_graham"]
+        # Moneda / Precios
+        currency_cols = [
+            "current_price",
+            "trailing_eps",
+            "forward_eps",
+            "book_value",
+            "intrinsic_value_graham",
+            "ccl"
+        ]
         for col_name in currency_cols:
             if col_name in col_indices:
                 col_idx = col_indices[col_name]
@@ -107,9 +122,28 @@ def export_to_excel(
                     cell = val_ws.cell(row=row, column=col_idx)
                     cell.number_format = '#,##0.00'
 
-        # Agregar Glosario
-        start_row = len(valuation_df) + 4
+                    # Evaluación de formato condicional solo para la columna 'ccl'
+                    if col_name == "ccl" and ccl_benchmark is not None and isinstance(cell.value, (int, float)):
+                        if cell.value < ccl_benchmark:
+                            cell.fill = ccl_yellow_fill
 
+        # --- SECCIÓN: COTIZACIÓN BENCHMARK CCL Y GLOSARIO ---
+        start_row = len(valuation_df) + 3
+
+        # 1. Cotización Dólar CCL Venta (DolarHoy)
+        if ccl_benchmark:
+            ccl_label_cell = val_ws.cell(row=start_row, column=1, value="Dólar CCL Venta (DolarHoy):")
+            ccl_val_cell = val_ws.cell(row=start_row, column=2, value=ccl_benchmark)
+            
+            ccl_label_cell.font = Font(name="Calibri", size=11, bold=True, color="1F4E78")
+            ccl_val_cell.font = Font(name="Calibri", size=11, bold=True, color="006100")
+            ccl_val_cell.number_format = '"$"#,##0.00'
+            
+            start_row += 3
+        else:
+            start_row += 1
+
+        # 2. Glosario de Columnas
         title_cell = val_ws.cell(row=start_row, column=1, value="Glosario y Descripción de Columnas")
         title_cell.font = section_font
 
@@ -126,7 +160,7 @@ def export_to_excel(
             cell_col.border = thin_border
             cell_desc.border = thin_border
 
-        # Autoajuste de ancho
+        # Autoajuste de ancho de columnas
         for sheet_name in writer.sheets:
             worksheet = writer.sheets[sheet_name]
             for col in worksheet.columns:
@@ -142,5 +176,5 @@ def export_to_excel(
                 
                 worksheet.column_dimensions[col_letter].width = max(max_len + 5, 14)
 
-    print(f"Successfully created '{filepath}' with formatted numbers and glossary!")
+    print(f"Successfully created '{filepath}' with formatted numbers, benchmark CCL, conditional formatting, and glossary!")
     return filepath
