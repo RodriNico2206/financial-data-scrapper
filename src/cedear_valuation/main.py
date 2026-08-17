@@ -1,4 +1,5 @@
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -22,11 +23,10 @@ from cedear_valuation.scrapers.fred import fetch_fred_aaa_yield
 from cedear_valuation.scrapers.market import fetch_stock_financials
 from cedear_valuation.scrapers.yahoo_jina import calculate_ccl_from_yahoo_jina
 
-# Mapeo de ratios manuales/fallback para sobreescribir errores o desfasajes de scraping
+# Fallback/Overrides manuales solo si un ticker no existe en Comafi
 MANUAL_RATIOS = {
     "BRK-B": 22.0,
     "BRKB": 22.0,
-    "ASML": 146.0,
 }
 
 
@@ -75,6 +75,14 @@ def main():
     raw_comafi_df = fetch_comafi_cedears()
     processed_comafi_df = process_cedear_ratios(raw_comafi_df)
 
+    # Identificar la columna de Ratio una sola vez fuera del loop
+    ratio_col = None
+    if not processed_comafi_df.empty:
+        ratio_col = next(
+            (c for c in processed_comafi_df.columns if "ratio" in c.lower()),
+            None,
+        )
+
     # 3. FRED Rate and CCL Benchmark Dollar from DolarHoy
     aaa_rate = fetch_fred_aaa_yield(api_key=fred_api_key)
     ccl_benchmark = fetch_dolar_ccl_venta()
@@ -85,82 +93,39 @@ def main():
         for ticker in tickers:
             lookup_ticker = ticker.upper().strip()
 
-            # Lógica para determinar el ratio: priorizar MANUAL_RATIOS
-            if lookup_ticker in MANUAL_RATIOS:
+            # Normalizar ticker buscado (remover '/' y '-') para hacer matching tolerante
+            norm_lookup = re.sub(r"[\/\-]", "", lookup_ticker)
+
+            ratio_val = 1.0
+            found_ratio = False
+
+            # Intento 1: Buscar en el DataFrame procesado de Comafi usando normalized_ticker
+            if (
+                not processed_comafi_df.empty
+                and "normalized_ticker" in processed_comafi_df.columns
+                and ratio_col
+            ):
+                match = processed_comafi_df[
+                    processed_comafi_df["normalized_ticker"] == norm_lookup
+                ]
+                if not match.empty:
+                    try:
+                        raw_ratio = str(match.iloc[0][ratio_col]).strip()
+                        if ":" in raw_ratio:
+                            num, denom = raw_ratio.split(":")
+                            ratio_val = float(num) / float(denom)
+                        elif "/" in raw_ratio:
+                            num, denom = raw_ratio.split("/")
+                            ratio_val = float(num) / float(denom)
+                        else:
+                            ratio_val = float(raw_ratio)
+                        found_ratio = True
+                    except (ValueError, ZeroDivisionError):
+                        ratio_val = 1.0
+
+            # Intento 2: Fallback a MANUAL_RATIOS si no se encontró en Comafi
+            if not found_ratio and lookup_ticker in MANUAL_RATIOS:
                 ratio_val = MANUAL_RATIOS[lookup_ticker]
-            else:
-                ratio_val = 1.0
-                if not processed_comafi_df.empty:
-                    # Normalizar nombres de columnas eliminando espacios no fraccionables (\xa0) y extra espacios
-                    cleaned_columns = {
-                        col: " ".join(str(col).replace("\xa0", " ").split()).lower()
-                        for col in processed_comafi_df.columns
-                    }
-
-                    # Identificar la columna de Ticker
-                    ticker_col = next(
-                        (
-                            orig
-                            for orig, clean in cleaned_columns.items()
-                            if clean
-                            in [
-                                "ticker en mercado de origen",
-                                "identificación mercado",
-                                "identificacion mercado",
-                                "ticker",
-                                "especie",
-                                "simbolo",
-                                "symbol",
-                            ]
-                        ),
-                        None,
-                    )
-
-                    # Identificar la columna de Ratio
-                    ratio_col = next(
-                        (
-                            orig
-                            for orig, clean in cleaned_columns.items()
-                            if clean
-                            in [
-                                "ratio cedear / accion o adr",
-                                "ratio cedear / valor sub-yacente",
-                                "ratio cedear / valor subyacente",
-                                "ratio cedear / accion",
-                                "ratio",
-                                "relacion",
-                                "ratios",
-                            ]
-                        ),
-                        None,
-                    )
-
-                    if ticker_col and ratio_col:
-                        match = processed_comafi_df[
-                            processed_comafi_df[ticker_col]
-                            .astype(str)
-                            .str.upper()
-                            .str.strip()
-                            == lookup_ticker
-                        ]
-                        if not match.empty:
-                            try:
-                                raw_ratio = str(match.iloc[0][ratio_col]).strip()
-                                if ":" in raw_ratio:
-                                    num, denom = raw_ratio.split(":")
-                                    ratio_val = float(num) / float(denom)
-                                elif "/" in raw_ratio:
-                                    num, denom = raw_ratio.split("/")
-                                    ratio_val = float(num) / float(denom)
-                                else:
-                                    ratio_val = float(raw_ratio)
-                            except (ValueError, ZeroDivisionError):
-                                ratio_val = 1.0
-                    else:
-                        print(
-                            "[WARN] No se detectó columna de Ticker/Ratio. "
-                            f"Columnas encontradas: {list(processed_comafi_df.columns)}"
-                        )
 
             # Get price in USD, ARS and CCL using yfinance
             yahoo_data = calculate_ccl_from_yahoo_jina(
@@ -175,7 +140,6 @@ def main():
             if fin_data:
                 eps = fin_data.get("trailing_eps")
                 growth = fin_data.get("earnings_growth")
-                # Prioritize Yahoo price in USD if obtained, otherwise use fin_data price
                 price = yahoo_data.get("price_usd") or fin_data.get(
                     "current_price"
                 )
