@@ -29,8 +29,8 @@ def export_to_excel(
     filename: str = "cedear_valuation_report.xlsx",
     output_dir: str = "reports"
 ) -> Path:
-    """Exporta DataFrames a Excel dentro del directorio especificado
-    y retorna la ruta (Path) del archivo generado.
+    """Exporta DataFrames a Excel aplicando formato numérico, glosario y 
+    resaltado condicional en amarillo para valores de CCL < ccl_benchmark.
     """
     reports_path = Path(output_dir)
     reports_path.mkdir(parents=True, exist_ok=True)
@@ -41,13 +41,16 @@ def export_to_excel(
         valuation_df.to_excel(writer, sheet_name="Valuation", index=False)
         comafi_df.to_excel(writer, sheet_name="Comafi Ratios", index=False)
         
-        # Estilos
+        # Estilos generales
         header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
         header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
         
         section_font = Font(name="Calibri", size=11, bold=True, color="1F4E78")
         bold_font = Font(name="Calibri", size=10, bold=True)
         regular_font = Font(name="Calibri", size=10)
+
+        # Relleno amarillo claro para la alerta condicional de CCL
+        ccl_yellow_fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
 
         thin_border = Border(
             left=Side(style="thin", color="D9D9D9"),
@@ -60,7 +63,7 @@ def export_to_excel(
         left_align = Alignment(horizontal="left", vertical="center")
         right_align = Alignment(horizontal="right", vertical="center")
 
-        # Formato base
+        # Formato base para todas las pestañas
         for sheet_name in writer.sheets:
             worksheet = writer.sheets[sheet_name]
 
@@ -79,10 +82,11 @@ def export_to_excel(
                     else:
                         cell.alignment = right_align
 
-        # Formatos numéricos en 'Valuation'
+        # Formatos numéricos y formato condicional en 'Valuation'
         val_ws = writer.sheets["Valuation"]
         col_indices = {cell.value: idx + 1 for idx, cell in enumerate(val_ws[1])}
 
+        # Porcentajes
         pct_cols = ["earnings_growth", "margin_of_safety_%", "aaa_rate_used"]
         for col_name in pct_cols:
             if col_name in col_indices:
@@ -93,6 +97,7 @@ def export_to_excel(
                     if col_name in ["margin_of_safety_%", "aaa_rate_used"] and isinstance(cell.value, (int, float)):
                         cell.value = cell.value / 100.0
 
+        # Números enteros
         num_cols = ["free_cash_flow", "shares_outstanding"]
         for col_name in num_cols:
             if col_name in col_indices:
@@ -101,13 +106,14 @@ def export_to_excel(
                     cell = val_ws.cell(row=row, column=col_idx)
                     cell.number_format = '#,##0'
 
+        # Moneda / Precios
         currency_cols = [
             "current_price",
             "trailing_eps",
             "forward_eps",
             "book_value",
             "intrinsic_value_graham",
-            "ccl"  # <- Columna única de CCL
+            "ccl"
         ]
         for col_name in currency_cols:
             if col_name in col_indices:
@@ -115,6 +121,11 @@ def export_to_excel(
                 for row in range(2, len(valuation_df) + 2):
                     cell = val_ws.cell(row=row, column=col_idx)
                     cell.number_format = '#,##0.00'
+
+                    # Evaluación de formato condicional solo para la columna 'ccl'
+                    if col_name == "ccl" and ccl_benchmark is not None and isinstance(cell.value, (int, float)):
+                        if cell.value < ccl_benchmark:
+                            cell.fill = ccl_yellow_fill
 
         # --- SECCIÓN: COTIZACIÓN BENCHMARK CCL Y GLOSARIO ---
         start_row = len(valuation_df) + 3
@@ -149,7 +160,7 @@ def export_to_excel(
             cell_col.border = thin_border
             cell_desc.border = thin_border
 
-        # Autoajuste de ancho
+        # Autoajuste de ancho de columnas
         for sheet_name in writer.sheets:
             worksheet = writer.sheets[sheet_name]
             for col in worksheet.columns:
@@ -165,5 +176,5 @@ def export_to_excel(
                 
                 worksheet.column_dimensions[col_letter].width = max(max_len + 5, 14)
 
-    print(f"Successfully created '{filepath}' with formatted numbers, benchmark CCL, and glossary!")
+    print(f"Successfully created '{filepath}' with formatted numbers, benchmark CCL, conditional formatting, and glossary!")
     return filepath
