@@ -28,8 +28,10 @@ The CEDEAR Valuation Pipeline is a Python-based system designed to fetch and pro
 │   │   ├── scrapers
 │   │   │   ├── __init__.py
 │   │   │   ├── comafi.py
+│   │   │   ├── dolarhoy.py
 │   │   │   ├── fred.py
-│   │   │   └── market.py
+│   │   │   ├── market.py
+│   │   │   └── yahoo_jina.py
 │   └── template_config.json
 └── uv.lock
 ```
@@ -40,6 +42,7 @@ The CEDEAR Valuation Pipeline consists of several modules:
 * `exporters/excel.py`: Exports valuation results to Excel reports.
 * `models/valuation.py`: Calculates Graham intrinsic value and margin of safety.
 * `scrapers/comafi.py`, `scrapers/fred.py`, `scrapers/market.py`: Fetch data from COMAFI, FRED, and stock market financials, respectively.
+* `scrapers/dolarhoy.py`, `scrapers/yahoo_jina.py`: Fetch FX/Dólar CCL exchange rates from DolarHoy and financial data via Yahoo Finance/Jina AI.
 * `main.py`: Orchestrates the pipeline execution, from data fetching to report export and upload.
 
 ## Prerequisites and Environment Setup
