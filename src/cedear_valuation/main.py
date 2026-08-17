@@ -17,12 +17,21 @@ from cedear_valuation.scrapers.comafi import (
     fetch_comafi_cedears,
     process_cedear_ratios,
 )
+from cedear_valuation.scrapers.dolarhoy import fetch_dolar_ccl_venta
 from cedear_valuation.scrapers.fred import fetch_fred_aaa_yield
 from cedear_valuation.scrapers.market import fetch_stock_financials
+from cedear_valuation.scrapers.yahoo_jina import calculate_ccl_from_yahoo_jina
+
+# Mapeo de ratios manuales/fallback para sobreescribir errores o desfasajes de scraping
+MANUAL_RATIOS = {
+    "BRK-B": 22.0,
+    "BRKB": 22.0,
+    "ASML": 146.0,
+}
 
 
 def upload_via_rclone(file_path: Path, remote_name: str, folder_name: str):
-    """Sincroniza el archivo local con Google Drive usando rclone."""
+    """Synchronizes the local file with Google Drive using rclone."""
     destination = f"{remote_name}:{folder_name}"
     command = ["rclone", "copy", str(file_path), destination]
 
@@ -51,7 +60,7 @@ def main():
 
     print("=== Starting CEDEAR Valuation Pipeline ===")
 
-    # 1. Cargar configuración
+    # 1. Load configuration
     config_path = Path(args.config)
     config = load_config(config_path)
 
@@ -62,30 +71,132 @@ def main():
     if not sectors and "tickers" in config:
         sectors = {"General": config["tickers"]}
 
-    # 2. Scrapers
+    # 2. Base scrapers (Comafi for ratios)
     raw_comafi_df = fetch_comafi_cedears()
     processed_comafi_df = process_cedear_ratios(raw_comafi_df)
 
-    # 3. Tasa FRED
+    # 3. FRED Rate and CCL Benchmark Dollar from DolarHoy
     aaa_rate = fetch_fred_aaa_yield(api_key=fred_api_key)
+    ccl_benchmark = fetch_dolar_ccl_venta()
 
-    # 4. Analizar tickers y sectores
+    # 4. Parse tickers and sectors
     valuation_results = []
     for sector_name, tickers in sectors.items():
         for ticker in tickers:
-            fin_data = fetch_stock_financials(ticker, sector=sector_name)
+            lookup_ticker = ticker.upper().strip()
+
+            # Lógica para determinar el ratio: priorizar MANUAL_RATIOS
+            if lookup_ticker in MANUAL_RATIOS:
+                ratio_val = MANUAL_RATIOS[lookup_ticker]
+            else:
+                ratio_val = 1.0
+                if not processed_comafi_df.empty:
+                    # Normalizar nombres de columnas eliminando espacios no fraccionables (\xa0) y extra espacios
+                    cleaned_columns = {
+                        col: " ".join(str(col).replace("\xa0", " ").split()).lower()
+                        for col in processed_comafi_df.columns
+                    }
+
+                    # Identificar la columna de Ticker
+                    ticker_col = next(
+                        (
+                            orig
+                            for orig, clean in cleaned_columns.items()
+                            if clean
+                            in [
+                                "ticker en mercado de origen",
+                                "identificación mercado",
+                                "identificacion mercado",
+                                "ticker",
+                                "especie",
+                                "simbolo",
+                                "symbol",
+                            ]
+                        ),
+                        None,
+                    )
+
+                    # Identificar la columna de Ratio
+                    ratio_col = next(
+                        (
+                            orig
+                            for orig, clean in cleaned_columns.items()
+                            if clean
+                            in [
+                                "ratio cedear / accion o adr",
+                                "ratio cedear / valor sub-yacente",
+                                "ratio cedear / valor subyacente",
+                                "ratio cedear / accion",
+                                "ratio",
+                                "relacion",
+                                "ratios",
+                            ]
+                        ),
+                        None,
+                    )
+
+                    if ticker_col and ratio_col:
+                        match = processed_comafi_df[
+                            processed_comafi_df[ticker_col]
+                            .astype(str)
+                            .str.upper()
+                            .str.strip()
+                            == lookup_ticker
+                        ]
+                        if not match.empty:
+                            try:
+                                raw_ratio = str(match.iloc[0][ratio_col]).strip()
+                                if ":" in raw_ratio:
+                                    num, denom = raw_ratio.split(":")
+                                    ratio_val = float(num) / float(denom)
+                                elif "/" in raw_ratio:
+                                    num, denom = raw_ratio.split("/")
+                                    ratio_val = float(num) / float(denom)
+                                else:
+                                    ratio_val = float(raw_ratio)
+                            except (ValueError, ZeroDivisionError):
+                                ratio_val = 1.0
+                    else:
+                        print(
+                            "[WARN] No se detectó columna de Ticker/Ratio. "
+                            f"Columnas encontradas: {list(processed_comafi_df.columns)}"
+                        )
+
+            # Get price in USD, ARS and CCL using yfinance
+            yahoo_data = calculate_ccl_from_yahoo_jina(
+                lookup_ticker, ratio=ratio_val
+            )
+            ccl_val = yahoo_data.get("ccl")
+
+            # Get financial metrics (EPS, Growth, etc.)
+            fin_data = fetch_stock_financials(
+                lookup_ticker, sector=sector_name
+            )
             if fin_data:
                 eps = fin_data.get("trailing_eps")
                 growth = fin_data.get("earnings_growth")
-                price = fin_data.get("current_price")
+                # Prioritize Yahoo price in USD if obtained, otherwise use fin_data price
+                price = yahoo_data.get("price_usd") or fin_data.get(
+                    "current_price"
+                )
 
                 intrinsic_val = calculate_graham_intrinsic_value(
                     eps, growth, aaa_rate
                 )
                 margin = calculate_margin_of_safety(price, intrinsic_val)
 
+                print(
+                    f"[{lookup_ticker}] USD: {price:.2f} | "
+                    f"Ratio: {ratio_val} | "
+                    f"Intrinsic Val: {intrinsic_val:.2f} | "
+                    f"CCL (Yahoo): {ccl_val}"
+                )
+
+                # Assignment of final data
+                fin_data["current_price"] = price
                 fin_data["intrinsic_value_graham"] = intrinsic_val
                 fin_data["margin_of_safety_%"] = margin
+                fin_data["ccl"] = ccl_val
                 fin_data["aaa_rate_used"] = aaa_rate
 
                 valuation_results.append(fin_data)
@@ -98,10 +209,14 @@ def main():
     else:
         valuation_df = pd.DataFrame()
 
-    # 5. Exportar reporte localmente
-    report_file = export_to_excel(processed_comafi_df, valuation_df)
+    # 5. Export report locally
+    report_file = export_to_excel(
+        comafi_df=processed_comafi_df,
+        valuation_df=valuation_df,
+        ccl_benchmark=ccl_benchmark,
+    )
 
-    # 6. Subir a Google Drive (si está habilitado en config.json)
+    # 6. Upload to Google Drive (if enabled in config.json)
     if drive_config.get("enabled", False):
         remote_name = drive_config.get("remote_name", "gdrive")
         folder_name = drive_config.get("folder_name", "CEDEAR_Reports")
